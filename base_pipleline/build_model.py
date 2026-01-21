@@ -137,11 +137,14 @@ X_train, X_test, y_train, y_test = train_test_split(
 print("[+] Training model...")
 
 model = RandomForestClassifier(
-    n_estimators=300,
+    n_estimators=700,
     max_depth=10,
     min_samples_leaf=2,
     random_state=42,
-    n_jobs=-1
+    n_jobs=-1,
+    min_samples_split=5,
+    oob_score=True,
+    class_weight='balanced'
 )
 
 model.fit(X_train, y_train)
@@ -181,3 +184,5 @@ artifact = {
 joblib.dump(artifact, MODEL_OUT)
 
 print(f"\n[✓] Model saved as {MODEL_OUT}")
+
+
