@@ -5,8 +5,8 @@ it helps to check the weak label json and pdf pdf line by line heading with line
 this help to make model training good'''
 import json
 import os
-from check import main_ex
-from convertor import extract_document_lines
+from insights import main_ex
+from extractor import extract_document_lines
 
 # -----------------------------
 # CONFIG
@@ -45,3 +45,4 @@ for line in lines:
     )
 
 print("\n[✓] Inspection complete")
+
