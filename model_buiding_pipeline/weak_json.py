@@ -17,8 +17,8 @@ DO NOT use for evaluation.
 import json
 import os
 from statistics import median
-from check import main_ex
-from convertor import extract_document_lines
+from insights import main_ex
+from extractor import extract_document_lines
 
 
 # ------------------------------
@@ -138,3 +138,4 @@ pdfs = [
 ]
 
 generate_weak_labels(pdfs)
+
