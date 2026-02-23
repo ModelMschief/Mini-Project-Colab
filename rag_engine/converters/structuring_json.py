@@ -1,6 +1,6 @@
 #pipeline/topic_retrieval/vectorDB.py
 
-from extract_classify.classify_model import classify_pdf
+from rag_engine.converters.extract_classify.classify_model import classify_pdf
 import json
 
 

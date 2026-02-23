@@ -1,7 +1,7 @@
 import pdfplumber
 import re
 
-from extractor import extract_document_lines
+from .extractor import extract_document_lines
 
 #-------- HELPERS -------- -> helps in building stats and checking text properties
 def build_stats(items):

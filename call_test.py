@@ -1,39 +1,15 @@
-import json
-from chromadb import PersistentClient
-from sentence_transformers import SentenceTransformer
+from rag_engine.converters.structuring_json import create_structured_json
+from rag_engine.converters.vector_build import build_vector_db
+from rag_engine.vector_search import fast_search
 import time
 
-from converters.vector_build import MODEL_NAME, COLLECTION_NAME, DB_PATH
+pdf_path = "test.pdf"
 
+#create_structured_json(pdf_path)
 
-print("--- Loading Resources into RAM ---")
-start_load = time.time()
+#time.sleep(3)  # Just to ensure the file is written before we read it
 
-# Load model once globally
-model = SentenceTransformer(MODEL_NAME)
-
-# Load Chroma once globally (PersistentClient caches the index in RAM while running)
-client = PersistentClient(path=DB_PATH)
-collection = client.get_collection(COLLECTION_NAME)
-
-print(f"--- Ready! (Loaded in {time.time() - start_load:.2f}s) ---")
-
-def fast_search(query, top_k=3):
-    """Search function using the globally loaded model and collection."""
-    start_time = time.time()
-    
-    # 1. Encode query
-    query_embedding = model.encode(query).tolist()
-    
-    # 2. Query vector DB
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k
-    )
-    
-    end_time = time.time()
-    return results, (end_time - start_time)
-
+#build_vector_db("structured.json")
 
 # ----------------------------
 # Continuous Test Loop

@@ -1,6 +1,6 @@
 import joblib
-from insights import main_ex
-from extractor import extract_document_lines
+from .insights import main_ex
+from .extractor import extract_document_lines
 
 # -----------------------------
 # CONFIG
