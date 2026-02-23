@@ -5,11 +5,11 @@ import time
 
 pdf_path = "test.pdf"
 
-#create_structured_json(pdf_path)
+create_structured_json(pdf_path)
 
-#time.sleep(3)  # Just to ensure the file is written before we read it
+time.sleep(3)  # Just to ensure the file is written before we read it
 
-#build_vector_db("structured.json")
+build_vector_db("structured.json")
 
 # ----------------------------
 # Continuous Test Loop
