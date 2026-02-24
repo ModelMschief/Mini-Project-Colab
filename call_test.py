@@ -1,6 +1,6 @@
 from rag_engine.converters.structuring_json import create_structured_json
 from rag_engine.converters.vector_build import build_vector_db
-from rag_engine.vector_search import fast_search
+
 import time
 
 pdf_path = "test.pdf"
@@ -15,6 +15,7 @@ build_vector_db("structured.json")
 # Continuous Test Loop
 # ----------------------------
 if __name__ == "__main__":
+    from rag_engine.vector_search import fast_search
     print("\n[Vektor RAG Speed Tester]")
     print("Type 'exit' or 'quit' to stop.")
     
