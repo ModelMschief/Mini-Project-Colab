@@ -42,5 +42,5 @@ if __name__ == "__main__":
             dist = results['distances'][0][i]
             
             print(f"RANK {i+1} | Score: {dist:.4f} | Section: {meta['heading']}")
-            print(f"Content: {doc[:400]}...") # Showing first 200 chars
+            print(f"Content: {doc[:500]}...") # Showing first 200 chars
             print("-" * 10)

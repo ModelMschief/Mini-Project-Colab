@@ -1,89 +1,104 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const chatHistory = document.getElementById('chat-history');
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-button');
     
-    // --- Configuration ---
     const baseUrl = 'http://127.0.0.1:5000'; 
-    const streamEndpoint = `${baseUrl}/stream-chat`;
-    
-    // **NEW CONFIGURATION:** Typing speed in milliseconds per character
-    const TYPING_SPEED_MS = 3; // Keep this low for Groq's speed
-    
-    // --- Helper Functions (Same as before) ---
+    const TYPING_SPEED_MS = 3;
+
+    // --- 1. Session & History Management ---
+
+    async function getSessionId() {
+        let sid = localStorage.getItem('chat_session_id');
+        if (!sid) {
+            const res = await fetch(`${baseUrl}/get-session`);
+            const data = await res.json();
+            sid = data.session_id;
+            localStorage.setItem('chat_session_id', sid);
+        }
+        return sid;
+    }
+
+    async function loadHistory() {
+        const sid = localStorage.getItem('chat_session_id');
+        if (!sid) return;
+
+        try {
+            const response = await fetch(`${baseUrl}/get-history`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sid })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                chatHistory.innerHTML = ''; // Clear welcome message
+                data.history.forEach(msg => {
+                    if (msg.role === 'user') appendUserMessage(msg.content);
+                    else renderStaticLLMMessage(msg.content);
+                });
+            } else if (response.status === 401) {
+                localStorage.removeItem('chat_session_id');
+            }
+        } catch (e) { console.error("History load failed", e); }
+    }
+
+    // --- 2. UI Helpers ---
+
     function appendUserMessage(message) {
         const msgDiv = document.createElement('div');
         msgDiv.classList.add('message', 'user-message');
         msgDiv.innerHTML = `You: ${message}`;
         chatHistory.appendChild(msgDiv);
-        chatHistory.scrollTop = chatHistory.scrollHeight; // Scroll to bottom
+        chatHistory.scrollTop = chatHistory.scrollHeight;
     }
 
-    // Renamed from createGeminiMessageContainer for Groq/General Use
     function createLLMMessageContainer() {
         const msgDiv = document.createElement('div');
         msgDiv.classList.add('message');
-        
         const contentDiv = document.createElement('div');
-        contentDiv.classList.add('gemini-message'); // Keep the CSS class for styling
-        contentDiv.innerHTML = 'Groq: <span id="response-text"></span>'; // Display "Groq"
-        
+        contentDiv.classList.add('gemini-message'); 
+        contentDiv.innerHTML = 'Groq: <span class="response-text"></span>';
         msgDiv.appendChild(contentDiv);
         chatHistory.appendChild(msgDiv);
-        chatHistory.scrollTop = chatHistory.scrollHeight;
-        
-        return contentDiv.querySelector('#response-text');
-    }
-    
-    function setControlsDisabled(disabled) {
-        chatInput.disabled = disabled;
-        sendButton.disabled = disabled;
+        return contentDiv.querySelector('.response-text');
     }
 
-    // --- Character Typing Promise Function ---
-    function typeCharacters(element, text) {
-        return new Promise(resolve => {
-            let i = 0;
-            function typeNext() {
-                if (i < text.length) {
-                    element.textContent += text.charAt(i);
-                    i++;
-                    setTimeout(typeNext, TYPING_SPEED_MS);
-                } else {
-                    resolve(); // Resolve the promise when the text chunk is finished typing
-                }
-            }
-            typeNext();
-        });
+    function renderStaticLLMMessage(text) {
+        const el = createLLMMessageContainer();
+        el.textContent = text;
     }
 
-    // --- Main Streaming Logic (MODIFIED) ---
+    async function typeCharacters(element, text) {
+        for (let i = 0; i < text.length; i++) {
+            element.textContent += text.charAt(i);
+            await new Promise(r => setTimeout(r, TYPING_SPEED_MS));
+        }
+    }
+
+    // --- 3. Main Chat Logic ---
+
     async function handleChat() {
         const prompt = chatInput.value.trim();
         if (!prompt) return;
 
+        const sessionId = await getSessionId();
         appendUserMessage(prompt);
-        setControlsDisabled(true);
         chatInput.value = '';
+        chatInput.disabled = true;
 
         const responseTextElement = createLLMMessageContainer();
         
         try {
-            const response = await fetch(streamEndpoint, {
+            const response = await fetch(`${baseUrl}/stream-chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: prompt })
+                body: JSON.stringify({ prompt: prompt, session_id: sessionId })
             });
 
-            if (!response.ok) {
-                // If the HTTP status code is an error (e.g., 500)
-                const errorText = await response.text();
-                responseTextElement.textContent = `HTTP Error ${response.status}: ${errorText.substring(0, 100)}`;
-                return;
-            }
-            
-            if (!response.body) {
-                responseTextElement.textContent = "Error: Stream not available.";
+            if (response.status === 401) {
+                localStorage.removeItem('chat_session_id');
+                responseTextElement.textContent = "Session expired. Please refresh the page.";
                 return;
             }
 
@@ -92,34 +107,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
             while (true) {
                 const { value, done } = await reader.read();
-                
-                if (done) {
-                    break; 
-                }
-
+                if (done) break;
                 const chunk = decoder.decode(value, { stream: true });
-                
-                // Wait for the chunk to finish typing
                 await typeCharacters(responseTextElement, chunk);
-                
-                chatHistory.scrollTop = chatHistory.scrollHeight; // Keep scrolling to the bottom
+                chatHistory.scrollTop = chatHistory.scrollHeight;
             }
-
         } catch (error) {
-            console.error('Streaming error:', error);
-            responseTextElement.textContent = `Error connecting to server or processing stream: ${error.message}`;
+            responseTextElement.textContent = "Error connecting to server.";
         } finally {
-            setControlsDisabled(false);
+            chatInput.disabled = false;
             chatInput.focus();
         }
     }
 
-    // --- Event Listeners (Same as before) ---
     sendButton.addEventListener('click', handleChat);
+    chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleChat(); });
     
-    chatInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleChat();
-        }
-    });
+    // Initialize history on load
+    loadHistory();
 });

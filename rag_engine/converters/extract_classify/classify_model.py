@@ -7,7 +7,7 @@ from .extractor import extract_document_lines
 # -----------------------------
 
 MODEL_PATH = "heading_classifier.joblib"
-PDF_PATH = "modularity\\pdfs\\test1.pdf"   # change this to the PDF you want to test
+PDF_PATH = "test.pdf"   # change this to the PDF you want to test
 
 
 # -----------------------------
@@ -51,13 +51,14 @@ def line_to_features(line, insights):
 def classify_pdf(pdf_path):
     lines = extract_document_lines(pdf_path)
     insights = main_ex(lines)
+    f_matrix = [line_to_features(line, insights) for line in lines]
+    pred = model.predict(f_matrix)
 
     structured_output = []
 
-    for line in lines:
-        features = line_to_features(line, insights)
-        pred = model.predict([features])[0]
-        label = inv_label_map[pred]
+    for i, line in enumerate(lines):
+        
+        label = inv_label_map[pred[i]]
 
         structured_output.append({
             "page_index": line["page_index"],
@@ -67,7 +68,7 @@ def classify_pdf(pdf_path):
         })
 
     return structured_output
-"""
+
 if __name__ == "__main__":
     print(f"\n[+] Model Classify on: {PDF_PATH}\n")
 
@@ -79,4 +80,4 @@ if __name__ == "__main__":
             f"{item['label']:<9} :: {item['text']}"
         )
 
-    print("\n[✓] Test complete")"""
+    print("\n[✓] Test complete")
