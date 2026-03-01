@@ -2,27 +2,17 @@ import joblib
 from .insights import main_ex
 from .extractor import extract_document_lines
 
-# -----------------------------
-# CONFIG
-# -----------------------------
-
 MODEL_PATH = "heading_classifier.joblib"
 PDF_PATH = "test.pdf"   # change this to the PDF you want to test
 
-
-# -----------------------------
 # LOAD MODEL
-# -----------------------------
 
 artifact = joblib.load(MODEL_PATH)
 model = artifact["model"]
 label_map = artifact["label_map"]
 inv_label_map = {v: k for k, v in label_map.items()}
 
-
-# -----------------------------
 # FEATURE EXTRACTION
-# -----------------------------
 
 def line_to_features(line, insights):
     fonts = set(line["style_stats"].keys())
@@ -69,6 +59,9 @@ def classify_pdf(pdf_path):
 
     return structured_output
 
+# Example usage in case to test the classify_pdf function directly without running the whole server
+#remove the triple quotes to run this test
+'''
 if __name__ == "__main__":
     print(f"\n[+] Model Classify on: {PDF_PATH}\n")
 
@@ -80,4 +73,4 @@ if __name__ == "__main__":
             f"{item['label']:<9} :: {item['text']}"
         )
 
-    print("\n[✓] Test complete")
+    print("\n[✓] Test complete")'''
