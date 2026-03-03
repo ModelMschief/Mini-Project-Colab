@@ -1,6 +1,6 @@
 # Web & API
-flask
-flask-cors
+quart
+quart_cors
 groq
 
 # Document Extraction
