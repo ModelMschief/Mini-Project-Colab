@@ -3,7 +3,7 @@ import re
 
 from .extractor import extract_document_lines
 
-#-------- HELPERS -------- -> helps in building stats and checking text properties
+#-helps in building stats and checking text properties
 def build_stats(items):
     stats = {}
     for item in items:
@@ -119,7 +119,6 @@ def size_insights(sizes_count):
     #headings_size = min(size_likelihood, key=size_likelihood.get)
     return headings_size, paragraphs_size
 
-# -------- MAIN EXECUTION --------
 #main funcation to call all other functions and return final insights
 def main_ex(all_lines):
     
@@ -137,7 +136,7 @@ def main_ex(all_lines):
     }
     return para_head_dict
 
-# -------- RUNNING THE SCRIPT -------- Can call multiple pdfs
+# --Can call multiple pdfs
 '''
 all_dict = extract_document_lines("modularity\\pdfs\\test.pdf")
 for line in all_dict:

@@ -1,10 +1,9 @@
-#pipeline/topic_retrieval/vectorDB.py
 
 from rag_engine.converters.extract_classify.classify_model import classify_pdf
 import json
 
 
-def create_structured_json(pdf_path, output_path="structured.json", max_words=400):
+def create_structured_json(pdf_path, output_path="structured.json", max_words=350):
     classified_lines = classify_pdf(pdf_path)
 
     structured = []
@@ -17,9 +16,7 @@ def create_structured_json(pdf_path, output_path="structured.json", max_words=40
         if not text:
             continue
 
-        # -------------------------
         # HEADING LOGIC
-        # -------------------------
         if label == "HEADING":
 
             # Skip tiny garbage headings (like "n", "i")
@@ -41,9 +38,7 @@ def create_structured_json(pdf_path, output_path="structured.json", max_words=40
 
             structured.append(current_section)
 
-        # -------------------------
         # PARAGRAPH LOGIC
-        # -------------------------
         elif label == "PARAGRAPH":
 
             if current_section is None:
@@ -56,17 +51,13 @@ def create_structured_json(pdf_path, output_path="structured.json", max_words=40
 
             current_section["content"].append(text)
 
-    # -------------------------
     # CHUNK SPLITTING BY SIZE
-    # -------------------------
-
     final_output = []
 
     for section in structured:
         if not section["content"]:
             continue
 
-        # --- IMPROVED JOINING LOGIC ---
         # Instead of " ".join(), we rebuild the text based on your "glue hints"
         full_text = ""
         lines = section["content"]
@@ -78,15 +69,13 @@ def create_structured_json(pdf_path, output_path="structured.json", max_words=40
                 
             if line.endswith("-"):
                 # Remove the hyphen and add the line WITHOUT a space
-                # This glues "comp-" and "letly" into "completely"
                 full_text += line[:-1]
             else:
                 # Add the line with a space (standard paragraph behavior)
-                # But check if it's the last line to avoid trailing space
                 full_text += line + (" " if idx < len(lines) - 1 else "")
         
         full_text = full_text.strip()
-        # --- END OF IMPROVED JOINING ---
+        #END OF IMPROVED JOINING 
 
         words = full_text.split()
         chunks = []
@@ -106,9 +95,7 @@ def create_structured_json(pdf_path, output_path="structured.json", max_words=40
             "chunks": chunks
         })
 
-    # -------------------------
     # SAVE JSON
-    # -------------------------
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(final_output, f, indent=2, ensure_ascii=False)

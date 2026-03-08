@@ -4,19 +4,14 @@ from sentence_transformers import SentenceTransformer
 import time
 
 
-# ----------------------------
-# Global model (load once)
-# ----------------------------
 MODEL_NAME = "all-MiniLM-L6-v2"
 COLLECTION_NAME = "documents"
 DB_PATH = "chroma_db"
 
 model = SentenceTransformer(MODEL_NAME)
 
-
-# ----------------------------
 # Build Vector Database
-# ----------------------------
+
 def build_vector_db(json_path):
 
     with open(json_path, "r", encoding="utf-8") as f:
@@ -52,7 +47,8 @@ def build_vector_db(json_path):
             if not isinstance(chunk_text, str) or not chunk_text.strip():
                 continue
 
-            all_texts.append(chunk_text)
+            combined_text = f"Section: {heading}\nContent: {chunk_text}"
+            all_texts.append(combined_text)
             all_ids.append(f"{idx}_{chunk_idx}")
             all_metadatas.append({"heading": heading})
 
@@ -60,7 +56,7 @@ def build_vector_db(json_path):
     
     if len(all_texts) == 0:
         print("No valid text chunks found. Aborting build.")
-        return # Exit gracefully instead of crashing
+        return 
 
     embeddings = model.encode(
         all_texts,

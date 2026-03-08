@@ -1,5 +1,4 @@
 import pdfplumber
-from docx import Document
 import re
 import os
 
@@ -34,7 +33,6 @@ def repair_sentence(all_lines):
                     split_words = segment(chunk)
                     
                     # Heuristic: If segmenting didn't change anything, keep original casing
-                    # Otherwise, use the segmented version
                     if len(split_words) == 1 and split_words[0].lower() == chunk.lower():
                         repaired_chunks.append(chunk)
                     else:
@@ -75,9 +73,7 @@ def repair_sentence(all_lines):
 
     return all_lines
 
-# ==========================================================
 # COMMON HELPERS
-# ==========================================================
 
 def build_stats(items):
     stats = {}
@@ -97,10 +93,6 @@ def starts_with_number(text):
 def ends_with_punctuation(text):
     return text.strip().endswith((".", "!", "?"))
 
-
-# ==========================================================
-# PDF EXTRACTOR (YOUR ORIGINAL LOGIC)
-# ==========================================================
 
 #Extract lines from pdf along with their attributes and stats
 def extract_lines_pdf(words, page_index, start_line_index, threshold=2):
@@ -194,55 +186,8 @@ def extract_pdf_lines(pdf_path):
     return all_lines
 
 
-# ==========================================================
-# DOCX EXTRACTOR
-# ==========================================================
 
-def extract_docx_lines(docx_path):
-    document = Document(docx_path)
-
-    all_lines = []
-    line_index = 0
-
-    for para_index, paragraph in enumerate(document.paragraphs):
-
-        text = paragraph.text.strip()
-        if not text:
-            continue
-
-        fonts = []
-        sizes = []
-
-        for run in paragraph.runs:
-            if run.text.strip():
-                font_name = run.font.name if run.font.name else "Unknown"
-                fonts.append(font_name)
-
-                if run.font.size:
-                    sizes.append(round(run.font.size.pt, 1))
-                else:
-                    sizes.append(0)
-
-        if not sizes:
-            sizes = [0]
-
-        all_lines.append(build_line_dict(
-            text,
-            line_index,
-            page_index=0,
-            top=para_index,      # simulated top
-            sizes=sizes,
-            fonts=fonts
-        ))
-
-        line_index += 1
-
-    return all_lines
-
-
-# ==========================================================
 # SHARED LINE DICT BUILDER
-# ==========================================================
 
 def build_line_dict(text, line_index, page_index, top, sizes, fonts):
     return {
@@ -258,19 +203,8 @@ def build_line_dict(text, line_index, page_index, top, sizes, fonts):
         "ends_with_punctuation": ends_with_punctuation(text)
     }
 
-
-# ==========================================================
 # UNIFIED ENTRY POINT
-# ==========================================================
 
 def extract_document_lines(file_path):
-    ext = os.path.splitext(file_path)[1].lower()
-
-    if ext == ".pdf":
         return extract_pdf_lines(file_path)
 
-    elif ext == ".docx":
-        return extract_docx_lines(file_path)
-
-    else:
-        raise ValueError("Unsupported file type. Only PDF and DOCX allowed.")
