@@ -15,3 +15,7 @@ scikit-learn
 # Vector Database & Embeddings
 chromadb
 sentence-transformers==5.1.2
+
+# Session & Database (for redis_backend.py)
+redis[hiredis]
+motor

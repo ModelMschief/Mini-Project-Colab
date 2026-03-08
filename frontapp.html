@@ -90,6 +90,8 @@
             text-align: center;
             max-width: 500px;
             margin: auto;
+            border-radius: 30px;
+            background-color: rgb(227, 238, 252);
             animation: fadeIn 0.6s ease-out;
         }
         .hero h2 { font-size: 32px; font-weight: 800; color: var(--brand-dark); margin-bottom: 12px; }
@@ -208,13 +210,21 @@
         <div class="hero" id="hero-section">
             <h2>Modern Intelligence.</h2>
             <p>Welcome to GraceBot. I'm equipped with document RAG capabilities and advanced conversational memory to assist your workflow.</p>
+            <div id="user-info-container" style="margin-top: 2rem; background: var(--surface-100); padding: 1.5rem; border-radius: 12px; border: 1px solid var(--surface-200); max-width: 400px; margin-left: auto; margin-right: auto;">
+                <h3 style="margin-top: 0; font-size: 1rem; color: var(--text-main);">Personalize your experience</h3>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <input type="text" id="user-name" placeholder="Full Name" style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--surface-200); background: var(--white);">
+                <input type="text" id="user-contact" placeholder="Email or Contact Number" style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--surface-200); background: var(--white);">
+                <button type="button" id="info-done-btn" onclick="sendUserInfo()" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: var(--brand-primary); color: white; border: none; cursor: pointer; font-weight: 600;">Done</button>
+             </div>
+            </div>
         </div>
     </main>
 
     <footer class="input-deck">
         <div class="composer">
             <input type="text" id="user-input" placeholder="Type your inquiry..." autocomplete="off">
-            <button class="action-btn" id="send-trigger">
+            <button type="button" class="action-btn" id="send-trigger">
                 <i class="fas fa-arrow-up"></i>
             </button>
         </div>

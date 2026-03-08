@@ -98,6 +98,27 @@ async def get_ai_ready_history(session_id):
     return ai_messages
 
 # --- ROUTING ---
+@app.route('/get_userinfo', methods=['POST'])
+async def get_userinfo():
+    data = await request.get_json()
+    sid = data.get('session_id')
+    name = data.get('name')
+    contact = data.get('contact')
+    
+    # Ensure we ALWAYS return a response
+    if not sid or sid not in sessions:
+        return jsonify({"status": "error", "message": "Session not found. Please start a chat first."}), 401
+
+    try:
+        sessions[sid]['user_name'] = name
+        sessions[sid]['user_contact'] = contact
+        print(f"DEBUG: Profile updated for {name}")
+        return jsonify({"status": "success", "message": "Profile updated"}), 200
+    except Exception as e:
+        print(f"ERROR updating user info: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/get-session', methods=['GET'])
 async def get_session():
     sid = str(uuid.uuid4())
@@ -105,19 +126,31 @@ async def get_session():
     'last_activity': time.time(),
     'memory_summary': "",
     'recent_history': [],
-    'full_history': []   # optional, only for frontend reload
+    'full_history': [],  # optional, only for frontend reload
+    'user_name': None,
+    'user_contact': None
     }
     return jsonify({"session_id": sid})
 
 @app.route('/get-history', methods=['POST'])
 async def get_history():
-    data = await request.get_json()
-    sid = data.get('session_id')
-    
-    if await validate_session(sid):
-        return jsonify({"history": sessions[sid]['full_history']})
-    
-    return jsonify({"error": "Expired"}), 401
+    try:
+        data = await request.get_json()
+        sid = data.get('session_id') if data else None
+        
+        # Return empty history for unknown/expired sessions instead of 401
+        # This prevents the frontend from destroying its session state
+        if not sid or sid not in sessions:
+            return jsonify({"history": []})
+        
+        if await validate_session(sid):
+            return jsonify({"history": sessions[sid]['full_history']})
+        
+        # Session expired — return empty history gracefully
+        return jsonify({"history": []})
+    except Exception as e:
+        print(f"ERROR in get-history: {e}")
+        return jsonify({"history": []})
 
 # --- Route: Streaming Chat with History Persistence ---
 @app.route('/stream-chat', methods=['POST'])
@@ -128,53 +161,78 @@ async def stream_chat():
     
     print(f"\n[DEBUG] Received prompt: {user_prompt}")
 
-    # 1. Validate session activity
-    if not await validate_session(session_id):
-        return jsonify({"error": "Invalid or expired session"}), 401
+    if not session_id or session_id not in sessions:
+        # Re-initialize the session in RAM if it's missing (e.g. after restart)
+        session_id = session_id or str(uuid.uuid4())
+        sessions[session_id] = {
+            'last_activity': time.time(),
+            'memory_summary': "",
+            'recent_history': [],
+            'full_history': [],
+            'user_name': None,
+            'user_contact': None
+        }
+        print(f"DEBUG: Session {session_id} re-initialized on-the-fly.")
+    else:
+        # Refresh the activity timer for existing sessions
+        sessions[session_id]['last_activity'] = time.time()
+
+    # Session is guaranteed valid at this point (re-created or refreshed above)
     
+    # 2. Append history and get history context
     sessions[session_id]['recent_history'].append({"role": "user", "content": user_prompt})
     sessions[session_id]['full_history'].append({"role": "user", "content": user_prompt})
     ai_history = await get_ai_ready_history(session_id)
-    
+    user_name = sessions[session_id].get('user_name') or "User"
 
-    # 3. Broad Retrieval (RAG Logic)
-    results, _ = await asyncio.to_thread(fast_search, user_prompt, top_k=5)
-    raw_context = "\n".join(results['documents'][0])
-
-    # 4. AI Shortener Call
-    shortener_response = await client.chat.completions.create(
-        model=SUMMARY_MODEL,
-        messages= [
-            {"role": "system", "content": "Extract ONLY the information from the context that helps answer the user's question.Remove unrelated details.Preserve technical terms and numbers.Keep the result concise."},
-            {"role": "user", "content": f"User Question: {user_prompt}\n\nContext: {raw_context}"}
-        ]
-    )
-    concise_context = shortener_response.choices[0].message.content
-    print(f"\n[DEBUG] Concise Context:\n{concise_context}\n")
-
-    # 5. Real Answer (Streaming call)
+    # 3. Define the Streaming Generator
     async def generate():
-        full_res = ""
-        
-        response_stream = await client.chat.completions.create(
-            model=FINAL_MODEL,
-            messages=ai_history + [
-                {"role": "system", "content": f"YOUR NAME IS 'GraceBot'. Use this summarized context to answer the user query: {concise_context}"},
-                {"role": "user", "content":f"Answer this friendly with 2 emojis: {user_prompt}"}
-            ],
-            stream=True
-        )
-        
-        async for chunk in response_stream:
-            if chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
-                full_res += content 
-                yield content
-        
-        # 6. Save assistant message to RAM history once stream completes
-        sessions[session_id]['recent_history'].append({"role": "assistant", "content": full_res})
-        sessions[session_id]['full_history'].append({"role": "assistant", "content": full_res})
-    await asyncio.sleep(0.3)  # slight delay to ensure streaming starts properly
+        try:
+            # Move retrieval and shortening INSIDE the generator to prevent 500 timeouts
+            results, _ = await asyncio.to_thread(fast_search, user_prompt, top_k=5)
+            raw_context = "\n".join(results['documents'][0])
+
+            # Initialize with a fallback in case the AI shortener fails
+            concise_context = "No specific context found."
+            
+            try:
+                shortener_response = await client.chat.completions.create(
+                    model=SUMMARY_MODEL,
+                    messages=[
+                        {"role": "system", "content": "Extract only relevant info for the user question."},
+                        {"role": "user", "content": f"User Question: {user_prompt}\n\nContext: {raw_context}"}
+                    ]
+                )
+                concise_context = shortener_response.choices[0].message.content
+                print(f"[DEBUG] Concise Context Prepared \n {concise_context}")
+            except Exception as e:
+                print(f"Warning: AI Shortener failed: {e}")
+
+            # 4. Final Answer Generation
+            full_res = ""
+            response_stream = await client.chat.completions.create(
+                model=FINAL_MODEL,
+                messages=ai_history + [
+                    {"role": "system", "content": f"YOUR NAME IS 'GraceBot' freindly charming dude. Helping {user_name}. Context: {concise_context}"},
+                    {"role": "user", "content": user_prompt}
+                ],
+                stream=True
+            )
+            
+            async for chunk in response_stream:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_res += content 
+                    yield content
+            
+            # 5. Finalize history update
+            sessions[session_id]['recent_history'].append({"role": "assistant", "content": full_res})
+            sessions[session_id]['full_history'].append({"role": "assistant", "content": full_res})
+
+        except Exception as e:
+            print(f"CRITICAL STREAM ERROR: {e}")
+            yield f"⚠️ GraceBot encountered an error: {str(e)}"
+
     return Response(generate(), mimetype='text/plain')
 
 if __name__ == '__main__':
