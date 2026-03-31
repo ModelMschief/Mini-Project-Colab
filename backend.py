@@ -59,43 +59,85 @@ async def validate_session(session_id):
     sessions[session_id]['last_activity'] = current_time
     return True
 
-async def get_ai_ready_history(session_id):
+def build_ai_history(session_id):
 
     session = sessions[session_id]
+    memory = session["memory_summary"]
+    full_history = session["full_history"]
+    total = len(full_history)
+    remainder = total % HISTORY_THRESHOLD
 
-    memory = session['memory_summary']
-    recent = session['recent_history']
+    if remainder == 0:
 
-    # If too many recent messages, summarize them into memory
-    if len(recent) >= HISTORY_THRESHOLD:
-
-        history_string = "\n".join([f"{m['role']}: {m['content']}" for m in recent])
-
+        # if summary exists → start new chunk
         if memory:
-            history_string = f"Previous memory:\n{memory}\n\nNew conversation:\n{history_string}"
+            recent_messages = []
 
-        summary_res = await client.chat.completions.create(
-            model=SUMMARY_MODEL,
-            messages=[
-                {"role": "system", "content": "Summarize this conversation memory while preserving key facts and user goals and user names."},
-                {"role": "user", "content": history_string}
-            ]
-        )
+        # if summary not yet created → use full history
+        else:
+            recent_messages = full_history
 
-        session['memory_summary'] = summary_res.choices[0].message.content
-        session['recent_history'] = []
+    else:
+        recent_messages = full_history[-remainder:]
 
     ai_messages = []
-
-    if session['memory_summary']:
+    if memory:
         ai_messages.append({
             "role": "system",
-            "content": f"Conversation memory: {session['memory_summary']}"
+            "content": f"Conversation memory:\n{memory}"
         })
 
-    ai_messages.extend(session['recent_history'])
-
+    ai_messages.extend(recent_messages)
     return ai_messages
+
+async def update_memory_summary(session_id):
+
+    session = sessions[session_id]
+    memory = session["memory_summary"]
+    full_history = session["full_history"]
+    total = len(full_history)
+
+    if total != 0 and total % HISTORY_THRESHOLD == 0:
+
+        last_chunk = full_history[-HISTORY_THRESHOLD:]
+        chunk_string = "\n".join(
+            [f"{m['role']}: {m['content']}" for m in last_chunk]
+        )
+
+        if memory:
+            chunk_string = f"""
+Previous memory:
+{memory}
+
+New messages:
+{chunk_string}
+"""
+        print("SUMMARY TRIGGERED")
+        try:
+            summary_res = await client.chat.completions.create(
+                model=SUMMARY_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": '''Extract persistent facts from the conversation.
+
+Only include:
+- user name
+- user goals
+- important topics discussed
+
+Do not invent information.
+
+Return concise bullet points.'''
+                    },
+                    {"role": "user", "content": chunk_string}
+                ]
+            )
+            session["memory_summary"] = summary_res.choices[0].message.content
+            print("NEW MEMORY:")
+            print(session["memory_summary"])
+        except Exception as e:
+            print("Summary failed:", e)
 
 # --- ROUTING ---
 @app.route('/get_userinfo', methods=['POST'])
@@ -167,7 +209,6 @@ async def stream_chat():
         sessions[session_id] = {
             'last_activity': time.time(),
             'memory_summary': "",
-            'recent_history': [],
             'full_history': [],
             'user_name': None,
             'user_contact': None
@@ -180,9 +221,10 @@ async def stream_chat():
     # Session is guaranteed valid at this point (re-created or refreshed above)
     
     # 2. Append history and get history context
-    sessions[session_id]['recent_history'].append({"role": "user", "content": user_prompt})
     sessions[session_id]['full_history'].append({"role": "user", "content": user_prompt})
-    ai_history = await get_ai_ready_history(session_id)
+
+    ai_history = build_ai_history(session_id)
+    print(f"Current history for reply :{ai_history} and {len(ai_history)}")
     user_name = sessions[session_id].get('user_name') or "User"
 
     # 3. Define the Streaming Generator
@@ -204,21 +246,39 @@ async def stream_chat():
                     ]
                 )
                 concise_context = shortener_response.choices[0].message.content
-                print(f"[DEBUG] Concise Context Prepared \n {concise_context}")
+                print(f"[DEBUG] Concise Context Prepared \n Selected topics get summurized")
             except Exception as e:
                 print(f"Warning: AI Shortener failed: {e}")
 
             # 4. Final Answer Generation
             full_res = ""
-            response_stream = await client.chat.completions.create(
-                model=FINAL_MODEL,
-                messages=ai_history + [
-                    {"role": "system", "content": f"YOUR NAME IS 'GraceBot' freindly charming dude. Helping {user_name}. Context: {concise_context}"},
-                    {"role": "user", "content": user_prompt}
-                ],
-                stream=True
-            )
-            
+            try:
+                response_stream = await client.chat.completions.create(
+                    model=FINAL_MODEL,
+                    messages=ai_history + [
+                        {"role": "system", "content": f"""
+You are GraceBot, a friendly assistant giving short answers.
+
+User name: {user_name}
+
+Always read the conversation history and memory before replying. 
+If information exists there (like the user's name or earlier topics), use it and do not say you forgot it.
+
+Say you don't have information only if it is not in the history, memory, or context.
+
+Context:
+{concise_context}
+"""},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    stream=True
+                )
+                print("Chat get generated....................................................")
+            except APIError as e:
+                print("FINAL model error")
+                yield  "⚠️ AI service unavailable."
+                return
+
             async for chunk in response_stream:
                 if chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
@@ -226,8 +286,9 @@ async def stream_chat():
                     yield content
             
             # 5. Finalize history update
-            sessions[session_id]['recent_history'].append({"role": "assistant", "content": full_res})
             sessions[session_id]['full_history'].append({"role": "assistant", "content": full_res})
+
+            await update_memory_summary(session_id)
 
         except Exception as e:
             print(f"CRITICAL STREAM ERROR: {e}")
@@ -238,4 +299,4 @@ async def stream_chat():
 if __name__ == '__main__':
 
     print("🚀 Flask Groq server starting...")
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    app.run(debug=True, host='127.0.0.1',use_reloader=False, port=5000)
