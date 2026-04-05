@@ -7,6 +7,45 @@ import re
 
 load()
 
+def calculate_text_features(line_dict, text):
+    """Calculates all text-based features for a given string and adds them to the dictionary"""
+    clean_text = text.strip()
+    chars = len(clean_text)
+    
+    # Base text updates
+    line_dict["text"] = text
+    line_dict["word_count"] = len(clean_text.split())
+    line_dict["char_length"] = chars
+    
+    # Ratios and Counts
+    alpha = sum(c.isalpha() for c in clean_text)
+    digits = sum(c.isdigit() for c in clean_text)
+    symbols = sum((not c.isalnum() and not c.isspace()) for c in clean_text)
+    math_symbol_count = sum(c in set("=<>+-*/^θλβˆ∑≈≤≥") for c in clean_text)
+    
+    alpha_chars = [c for c in clean_text if c.isalpha()]
+    total_alpha = len(alpha_chars)
+    upper_count = sum(1 for c in alpha_chars if c.isupper())
+    upper_ratio = upper_count / total_alpha if total_alpha > 0 else 0.0
+
+    line_dict["is_upper"] = int(clean_text.isupper())
+    line_dict["is_title"] = int(clean_text.istitle())
+    line_dict["upper_ratio"] = round(upper_ratio, 3)
+    
+    line_dict["is_tiny"] = 1 if line_dict["word_count"] <= 2 else 0
+    line_dict["is_numeric_only"] = 1 if clean_text.isdigit() else 0
+    line_dict["alpha_ratio"] = alpha / chars if chars > 0 else 0
+    line_dict["digit_ratio"] = digits / chars if chars > 0 else 0
+    line_dict["symbol_ratio"] = symbols / chars if chars > 0 else 0
+    line_dict["has_math_symbol"] = 1 if math_symbol_count > 0 else 0
+
+    # RECALCULATE PUNCTUATION (Fixes the stale punctuation bug)
+    line_dict["has_symbol"] = bool(re.search(r"[•●▪■→]", text))
+    line_dict["starts_with_number"] = bool(re.match(r"^\d+[\.\)]", clean_text))
+    line_dict["ends_with_punctuation"] = clean_text.endswith((".", "!", "?"))
+
+    return line_dict
+
 def repair_sentence(all_lines):
     for line in all_lines:
         text = line["text"]
@@ -44,32 +83,7 @@ def repair_sentence(all_lines):
 
         final_repaired = " ".join(final_repaired)
         
-        chars = len(final_repaired)
-        alpha = sum(c.isalpha() for c in final_repaired)
-        digits = sum(c.isdigit() for c in final_repaired)
-        symbols = sum((not c.isalnum() and not c.isspace()) for c in final_repaired)
-        math_symbols = set("=<>+-*/^θλβˆ∑≈≤≥")
-        math_symbol_count = sum(c in math_symbols for c in final_repaired)
-
-        word_count = len(final_repaired.split())
-
-        
-        line["text"] = final_repaired
-        line["word_count"] = word_count
-
-        # Tiny line (very short fragments)
-        line["is_tiny"] = 1 if word_count <= 2 else 0
-
-        # Pure number line (e.g., "1", "2")
-        line["is_numeric_only"] = 1 if final_repaired.strip().isdigit() else 0
-
-        # Character ratios
-        line["alpha_ratio"] = alpha / chars if chars else 0
-        line["digit_ratio"] = digits / chars if chars else 0
-        line["symbol_ratio"] = symbols / chars if chars else 0
-
-        # Contains math symbols
-        line["has_math_symbol"] = 1 if math_symbol_count > 0 else 0
+        calculate_text_features(line, final_repaired)
 
     return all_lines
 
@@ -97,12 +111,10 @@ def ends_with_punctuation(text):
 #Extract lines from pdf along with their attributes and stats
 def extract_lines_pdf(words, page_index, start_line_index, threshold=2):
     lines = []
-
     current_text = ""
     current_top = None
     current_fonts = []
     current_sizes = []
-
     line_index = start_line_index
 
     for word in words:
@@ -119,48 +131,34 @@ def extract_lines_pdf(words, page_index, start_line_index, threshold=2):
 
         elif abs(word_top - current_top) <= threshold:
             current_text += " " + word_text
-
-            if word_font not in current_fonts:
-                current_fonts.append(word_font)
-
-            if word_size not in current_sizes:
-                current_sizes.append(word_size)
-
+            if word_font not in current_fonts: current_fonts.append(word_font)
+            if word_size not in current_sizes: current_sizes.append(word_size)
         else:
-            lines.append({
-                "text": current_text,
+            # Build base dictionary, then add features
+            line_dict = {
                 "line_index": line_index,
                 "page_index": page_index,
                 "layout": {"top": current_top},
-                "word_count": len(current_text.split()),
                 "size_stats": build_stats(current_sizes),
-                "style_stats": build_stats(current_fonts),
-                "has_symbol": has_symbol(current_text),
-                "starts_with_number": starts_with_number(current_text),
-                "ends_with_punctuation": ends_with_punctuation(current_text)
-            })
-
+                "style_stats": build_stats(current_fonts)
+            }
+            lines.append(calculate_text_features(line_dict, current_text))
+            
             line_index += 1
-
             current_top = word_top
             current_text = word_text
             current_fonts = [word_font]
             current_sizes = [word_size]
 
     if current_text:
-        lines.append({
-            "text": current_text,
+        line_dict = {
             "line_index": line_index,
             "page_index": page_index,
             "layout": {"top": current_top},
-            "word_count": len(current_text.split()),
             "size_stats": build_stats(current_sizes),
-            "style_stats": build_stats(current_fonts),
-            "has_symbol": has_symbol(current_text),
-            "starts_with_number": starts_with_number(current_text),
-            "ends_with_punctuation": ends_with_punctuation(current_text)
-        })
-
+            "style_stats": build_stats(current_fonts)
+        }
+        lines.append(calculate_text_features(line_dict, current_text))
         line_index += 1
 
     return lines, line_index
@@ -184,24 +182,6 @@ def extract_pdf_lines(pdf_path):
     all_lines = repair_sentence(all_lines)
 
     return all_lines
-
-
-
-# SHARED LINE DICT BUILDER
-
-def build_line_dict(text, line_index, page_index, top, sizes, fonts):
-    return {
-        "text": text,
-        "line_index": line_index,
-        "page_index": page_index,
-        "layout": {"top": top},
-        "word_count": len(text.split()),
-        "size_stats": build_stats(sizes),
-        "style_stats": build_stats(fonts),
-        "has_symbol": has_symbol(text),
-        "starts_with_number": starts_with_number(text),
-        "ends_with_punctuation": ends_with_punctuation(text)
-    }
 
 # UNIFIED ENTRY POINT
 
