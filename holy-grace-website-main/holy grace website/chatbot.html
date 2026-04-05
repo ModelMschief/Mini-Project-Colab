@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot - Holy Grace Academy</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    
+   
+   <div class="chat-container">
+
+    <!-- Header -->
+    <div class="chat-header">
+       
+           
+        
+        <span>College Assistant</span>
+       
+        <button onclick="window.location.href='index.html'">✕</button>
+    </div>
+    
+        
+        
+        
+    
+
+    <!-- Chat Messages -->
+    <div id="chat-log" class="chat-body">
+
+        <!-- Default Welcome Message -->
+        <div class="message bot">
+            Hii 👋 Welcome to Holy Grace Academy!
+        </div>
+
+        <!-- FAQ Suggestions Inside Chat -->
+        <div class="faq-suggestions">
+            <button class="faq-btn" data-question="admissions">
+                How do I apply for admissions?
+            </button>
+
+            <button class="faq-btn" data-question="fees">
+                What are the tuition fees?
+            </button>
+
+            <button class="faq-btn" data-question="courses">
+                What courses are offered?
+            </button>
+
+            <button class="faq-btn" data-question="contact">
+                How can I contact the college?
+            </button>
+        </div>
+
+    </div>
+
+    <!-- Input Area -->
+    <div class="chat-input-area">
+        <input type="text" id="user-input" placeholder="Write your query here...">
+        <button id="send-btn">➤</button>
+    </div>
+
+</div>
+
+</div>
+    <footer>
+        <p>&copy; Holy Grace Academy of Engineering is Designed By Gravity Innovations</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot - Holy Grace Academy</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    
+   
+   <div class="chat-container">
+
+    <!-- Chat Header -->
+    <div class="chat-header">
+
+        <div class="header-center">
+            <img src="images/logo.png" class="header-logo">
+            <div>
+                <h4>GRACE BOT</h4>
+                <span class="status">We typically reply in few minutes</span>
+            </div>
+        </div>
+
+        <button onclick="window.location.href='index.html'" class="close-btn">✕</button>
+
+    </div>
+
+
+    <!-- Chat Messages -->
+    <div id="chat-log" class="chat-body">
+
+        <div class="message bot">
+            Hi 👋 Welcome to Holy Grace Academy!
+        </div>
+
+        <!-- Quick Buttons -->
+        <div class="quick-buttons">
+            <button class="faq-btn" data-question="admissions">Admissions</button>
+            <button class="faq-btn" data-question="fees">Fees</button>
+            <button class="faq-btn" data-question="courses">Courses</button>
+            <button class="faq-btn" data-question="contact">Contact</button>
+        </div>
+
+    </div>
+
+
+    <!-- Input -->
+    <div class="chat-input-area">
+    <input type="text" id="user-input" placeholder="Enter your message..." autocomplete="off">
+    
+    <button id="send-btn" class="send-btn" disabled>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 19V5M12 5L5 12M12 5L19 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </button>
+</div>
+
+</div>
+
+</div>
+    <footer>
+        <p>&copy; Holy Grace Academy of Engineering is Designed By Gravity Innovations</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
