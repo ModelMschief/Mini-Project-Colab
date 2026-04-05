@@ -1,7 +1,7 @@
 '''
 A semi agentic optimized backend for this project,
 might  strugle with memory management and long conversations,
-but should be more efficient and cost effective for short interactions.
+but should be more efficient and cost effective for short interactions
 '''
 import os
 import time
