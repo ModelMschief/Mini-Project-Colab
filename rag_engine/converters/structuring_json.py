@@ -23,11 +23,11 @@ def create_structured_json(pdf_path, output_path="structured.json", max_words=35
             if len(text.split()) == 1 and len(text) <= 3:
                 continue
 
-            # Merge consecutive headings (if needed)
-            if current_section and current_section["type"] == "heading":
-                if not text[0].isdigit():
-                    current_section["heading"] += " " + text
-                    continue
+            # Merge consecutive headings ONLY when no paragraphs exist yet
+            # (handles multi-line titles like "Digital nano..." + "...silicon Mie voids")
+            if current_section and current_section["type"] == "heading" and len(current_section["content"]) == 0:
+                current_section["heading"] += " " + text
+                continue
 
             # Start new section
             current_section = {

@@ -15,6 +15,9 @@ from groq import AsyncGroq
 from groq import APIError
 import uuid
 
+import motor.motor_asyncio
+import chat_summarizer
+
 try:
     from rag_engine.vector_search import fast_search
 except Exception as e:
@@ -46,6 +49,14 @@ try:
 except Exception as e:
     print(f"FATAL ERROR initializing Groq client: {e}")
     sys.exit(1)
+
+
+# ─────────────────────────────────────────────
+#  MONGODB CLIENT
+# ─────────────────────────────────────────────
+mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+mongo_db = mongo_client["gracebot"]
+mongo_histories = mongo_db["chat_histories"]
 
 
 # ─────────────────────────────────────────────
@@ -101,11 +112,13 @@ You are GraceBot, a friendly and helpful assistant.
 Produce the final, user-facing response based on the verified draft.
 
 Rules:
-- Be clear and concise.
+- Be clear and concise and very short.
 - Use the user's name if known.
 - Do not expose internal reasoning, tool calls, or intermediate steps.
 - If no answer was found, say: "I do not have enough information to answer that."
+- FORMATTING: Always use Markdown formatting for bolding text, and strictly use Markdown link syntax `[Title](url)` for any web links.
 """
+
 
 
 # ─────────────────────────────────────────────
@@ -118,7 +131,7 @@ async def validate_session(session_id):
     current_time = time.time()
     last_activity = sessions[session_id]['last_activity']
     if (current_time - last_activity) > session_timeout:
-        del sessions[session_id]
+        # Session expired — background monitor handles summarization + cleanup
         return False
     sessions[session_id]['last_activity'] = current_time
     return True
@@ -455,6 +468,89 @@ async def agentic_pipeline(user_prompt: str, session_id: str):
     # Persist assistant response
     sessions[session_id]['full_history'].append({"role": "assistant", "content": full_res})
     await update_memory_summary(session_id)
+
+
+# ─────────────────────────────────────────────
+#  BACKGROUND SESSION MONITOR
+# ─────────────────────────────────────────────
+
+async def session_monitor():
+    """Background task: checks for sessions nearing expiry, summarizes and cleans."""
+    print("[MONITOR] Session monitor started")
+    while True:
+        await asyncio.sleep(30)
+        now = time.time()
+        expired_sids = []
+
+        for sid, session in list(sessions.items()):
+            time_left = session_timeout - (now - session['last_activity'])
+            if time_left <= 60:
+                expired_sids.append(sid)
+
+        for sid in expired_sids:
+            session = sessions.get(sid)
+            if not session:
+                continue
+
+            print(f"[MONITOR] Session {sid[:8]}... expiring. Triggering summarization...")
+            try:
+                success = await chat_summarizer.summarize_and_save(
+                    client=client,
+                    mongo_collection=mongo_histories,
+                    session_id=sid,
+                    full_history=session.get('full_history', []),
+                    user_name=session.get('user_name'),
+                    user_contact=session.get('user_contact'),
+                    summary_model=SUMMARY_MODEL,
+                    final_model=REASONING_MODEL
+                )
+                if success:
+                    print(f"[MONITOR] ✅ Session {sid[:8]}... summarized and saved")
+                else:
+                    print(f"[MONITOR] ⏭️ Session {sid[:8]}... skipped (too short)")
+            except Exception as e:
+                print(f"[MONITOR] ❌ Summarization failed for {sid[:8]}...: {e}")
+            finally:
+                sessions.pop(sid, None)
+                print(f"[MONITOR] 🗑️ Session {sid[:8]}... removed from RAM")
+
+
+# ─────────────────────────────────────────────
+#  STARTUP / SHUTDOWN
+# ─────────────────────────────────────────────
+
+@app.before_serving
+async def startup():
+    asyncio.create_task(session_monitor())
+    try:
+        await mongo_db.command("ping")
+        print("[OK] MongoDB Atlas connected successfully")
+    except Exception as e:
+        print(f"[WARN] MongoDB connection issue: {e}")
+
+
+@app.after_serving
+async def shutdown():
+    print("[SHUTDOWN] Summarizing remaining sessions...")
+    for sid in list(sessions.keys()):
+        session = sessions[sid]
+        try:
+            await chat_summarizer.summarize_and_save(
+                client=client,
+                mongo_collection=mongo_histories,
+                session_id=sid,
+                full_history=session.get('full_history', []),
+                user_name=session.get('user_name'),
+                user_contact=session.get('user_contact'),
+                summary_model=SUMMARY_MODEL,
+                final_model=REASONING_MODEL
+            )
+        except Exception as e:
+            print(f"[SHUTDOWN] Failed for {sid[:8]}...: {e}")
+        finally:
+            sessions.pop(sid, None)
+    mongo_client.close()
+    print("[SHUTDOWN] All connections closed.")
 
 
 # ─────────────────────────────────────────────

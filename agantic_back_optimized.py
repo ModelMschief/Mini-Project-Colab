@@ -1,9 +1,8 @@
 '''
 A semi agentic optimized backend for this project,
 might  strugle with memory management and long conversations,
-but should be more efficient and cost effective for short interactions.
+but should be more efficient and cost effective for short interactions
 '''
-
 import os
 import time
 import sys
@@ -16,6 +15,9 @@ from groq import AsyncGroq
 from groq import APIError
 import uuid
 
+import motor.motor_asyncio
+import chat_summarizer
+
 try:
     from rag_engine.vector_search import fast_search
 except Exception as e:
@@ -23,9 +25,7 @@ except Exception as e:
     sys.exit(1)
 import apis
 
-# ─────────────────────────────────────────────
 #  CONFIG
-# ─────────────────────────────────────────────
 API_KEY_HARDCODED = apis.api
 MONGO_URI = apis.mongo_uri
 session_timeout = 600
@@ -48,10 +48,12 @@ except Exception as e:
     print(f"FATAL ERROR initializing Groq client: {e}")
     sys.exit(1)
 
+#  MONGODB CLIENT
+mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+mongo_db = mongo_client["gracebot"]
+mongo_histories = mongo_db["chat_histories"]
 
-# ─────────────────────────────────────────────
-#  PROMPTS
-# ─────────────────────────────────────────────
+#  PROMPTS ____________
 
 PLANNER_SYSTEM = """\
 You are a conservative planning agent. Given a user question, conversation history, and memory,
@@ -122,24 +124,21 @@ You are GraceBot, a friendly and helpful assistant.
 Produce the final, user-facing response based on the verified draft.
 
 Rules:
-- Be clear and concise.
+- Be clear and concise and very short.
 - Use the user's name if known.
 - Do not expose internal reasoning, tool calls, or intermediate steps.
 - If no answer was found, say: "I do not have enough information to answer that."
+- FORMATTING: Use Markdown for emphasis (e.g., **bold**). If you find any URLs or links in your context, always format them as Markdown links like [Link Text](https://url.com).
 """
 
-
-# ─────────────────────────────────────────────
 #  SESSION HELPERS
-# ─────────────────────────────────────────────
-
 async def validate_session(session_id):
     if not session_id or session_id not in sessions:
         return False
     current_time = time.time()
     last_activity = sessions[session_id]['last_activity']
     if (current_time - last_activity) > session_timeout:
-        del sessions[session_id]
+        # Session expired — background monitor handles summarization + cleanup
         return False
     sessions[session_id]['last_activity'] = current_time
     return True
@@ -233,11 +232,7 @@ async def update_memory_summary(session_id):
         except Exception as e:
             print("Summary failed:", e)
 
-
-# ─────────────────────────────────────────────
 #  TOOL REGISTRY
-# ─────────────────────────────────────────────
-
 async def tool_search(query: str, top_k: int = 5) -> str:
     results, _ = await asyncio.to_thread(fast_search, query, top_k=top_k)
     docs = results['documents'][0]
@@ -276,11 +271,7 @@ async def execute_tool(tool_call: dict, session_id: str) -> str:
     else:
         return f"Unknown tool: {name}"
 
-
-# ─────────────────────────────────────────────
 #  JSON EXTRACTION HELPER
-# ─────────────────────────────────────────────
-
 def extract_json(text: str) -> dict | None:
     """Robustly extract first JSON object from a string."""
     # Strip markdown code fences
@@ -293,11 +284,7 @@ def extract_json(text: str) -> dict | None:
             pass
     return None
 
-
-# ─────────────────────────────────────────────
 #  AGENTIC LOOP
-# ─────────────────────────────────────────────
-
 async def rewrite_query(user_prompt: str) -> str:
     """Use small model to rewrite user question into a retrieval-optimized query."""
     try:
@@ -316,23 +303,7 @@ async def rewrite_query(user_prompt: str) -> str:
         print(f"[AGENT] Query rewrite failed: {e}")
         return user_prompt
 
-
 async def agentic_pipeline(user_prompt: str, session_id: str):
-    """
-    Multi-step agentic pipeline.
-    Yields string chunks for streaming to the client.
-
-    Stages:
-      1. Name extraction (zero-cost, regex)
-      2. Planner   → decide which tools to call (conservative, no expand_search)
-      3. Query rewrite → optimized retrieval query
-      4. Tool loop → execute tools (deduped, no expand_search at this stage)
-      5. Context   → compress tool results (skipped if results < 1200 chars)
-      6. Reasoning → draft answer (<200 tokens)
-      7. Verifier  → check grounding; triggers expand_search only if needed
-      8. Final     → stream polished answer to user
-    """
-
     session = sessions[session_id]
 
     # ── PRE-STAGE: Auto name extraction ─────────────────────────────
@@ -556,11 +527,81 @@ async def agentic_pipeline(user_prompt: str, session_id: str):
     sessions[session_id]['full_history'].append({"role": "assistant", "content": full_res})
     await update_memory_summary(session_id)
 
+#  BACKGROUND SESSION MONITOR
+async def session_monitor():
+    """Background task: checks for sessions nearing expiry, summarizes and cleans."""
+    print("[MONITOR] Session monitor started")
+    while True:
+        await asyncio.sleep(30)
+        now = time.time()
+        expired_sids = []
 
-# ─────────────────────────────────────────────
+        for sid, session in list(sessions.items()):
+            time_left = session_timeout - (now - session['last_activity'])
+            if time_left <= 60:
+                expired_sids.append(sid)
+
+        for sid in expired_sids:
+            session = sessions.get(sid)
+            if not session:
+                continue
+
+            print(f"[MONITOR] Session {sid[:8]}... expiring. Triggering summarization...")
+            try:
+                success = await chat_summarizer.summarize_and_save(
+                    client=client,
+                    mongo_collection=mongo_histories,
+                    session_id=sid,
+                    full_history=session.get('full_history', []),
+                    user_name=session.get('user_name'),
+                    user_contact=session.get('user_contact'),
+                    summary_model=SUMMARY_MODEL,
+                    final_model=REASONING_MODEL
+                )
+                if success:
+                    print(f"[MONITOR] ✅ Session {sid[:8]}... summarized and saved")
+                else:
+                    print(f"[MONITOR] ⏭️ Session {sid[:8]}... skipped (too short)")
+            except Exception as e:
+                print(f"[MONITOR] ❌ Summarization failed for {sid[:8]}...: {e}")
+            finally:
+                sessions.pop(sid, None)
+                print(f"[MONITOR] 🗑️ Session {sid[:8]}... removed from RAM")
+
+#  STARTUP / SHUTDOWN
+@app.before_serving
+async def startup():
+    asyncio.create_task(session_monitor())
+    try:
+        await mongo_db.command("ping")
+        print("[OK] MongoDB Atlas connected successfully")
+    except Exception as e:
+        print(f"[WARN] MongoDB connection issue: {e}")
+
+@app.after_serving
+async def shutdown():
+    print("[SHUTDOWN] Summarizing remaining sessions...")
+    for sid in list(sessions.keys()):
+        session = sessions[sid]
+        try:
+            await chat_summarizer.summarize_and_save(
+                client=client,
+                mongo_collection=mongo_histories,
+                session_id=sid,
+                full_history=session.get('full_history', []),
+                user_name=session.get('user_name'),
+                user_contact=session.get('user_contact'),
+                summary_model=SUMMARY_MODEL,
+                final_model=REASONING_MODEL
+            )
+        except Exception as e:
+            print(f"[SHUTDOWN] Failed for {sid[:8]}...: {e}")
+        finally:
+            sessions.pop(sid, None)
+    mongo_client.close()
+    print("[SHUTDOWN] All connections closed.")
+
 #  ROUTES
-# ─────────────────────────────────────────────
-
 @app.route('/get_userinfo', methods=['POST'])
 async def get_userinfo():
     data = await request.get_json()
@@ -579,7 +620,6 @@ async def get_userinfo():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
 @app.route('/get-session', methods=['GET'])
 async def get_session():
     sid = str(uuid.uuid4())
@@ -591,7 +631,6 @@ async def get_session():
         'user_contact': None
     }
     return jsonify({"session_id": sid})
-
 
 @app.route('/get-history', methods=['POST'])
 async def get_history():
@@ -606,7 +645,6 @@ async def get_history():
     except Exception as e:
         print(f"ERROR in get-history: {e}")
         return jsonify({"history": []})
-
 
 @app.route('/stream-chat', methods=['POST'])
 async def stream_chat():
@@ -645,7 +683,6 @@ async def stream_chat():
             yield f"⚠️ GraceBot encountered an error: {str(e)}"
 
     return Response(generate(), mimetype='text/plain')
-
 
 if __name__ == '__main__':
     print("🚀 GraceBot Agentic server starting...")
