@@ -1,0 +1,11 @@
+.env
+.env.local
+apis.py
+__pycache__/
+*.txt
+redis_backend.py
+holyg.docx
+chroma_db/
+.vscode/
+*.json
+backend.py

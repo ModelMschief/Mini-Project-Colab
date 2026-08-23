@@ -108,7 +108,7 @@ def line_to_features(line, insights):
     ]
 
 
-# MAIN CLASSIFICATION API
+# MAIN CLASSIFICATION FUNCTION
 def classify_pdf(pdf_path):
     """
     Called by structuring_json.py.
