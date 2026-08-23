@@ -7,5 +7,5 @@ redis_backend.py
 holyg.docx
 chroma_db/
 .vscode/
-*.json
+structured.json
 backend.py

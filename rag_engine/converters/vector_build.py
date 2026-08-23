@@ -77,7 +77,8 @@ def build_vector_db(json_path):
     print("Total items in DB:", collection.count())
 
 
-build_vector_db("C:\\Users\\SHEBIN\\OneDrive\\Desktop\\minigitpush\\Mini-Project-Colab\\structured.json")
+if __name__ == "__main__":
+    build_vector_db("structured.json")
 
 '''
 # ----------------------------
