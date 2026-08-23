@@ -165,7 +165,9 @@ async def groq_call_with_retry(model: str, messages: list, max_tokens: int, stre
                 last_exc = e
             else:
                 raise
-    raise last_exc  # exhausted retries
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Groq API call failed after retries")
 
 # ── Auto-extract user name from prompt ─────────────────────────────────────
 _NAME_PATTERNS = re.compile(
