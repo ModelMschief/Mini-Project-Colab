@@ -5,8 +5,11 @@ import asyncio
 from quart import Quart, request, Response, jsonify
 from quart_cors import cors
 from groq import AsyncGroq
-from groq import APIError # Groq's equivalent of an API Error
+from groq import APIError
 import uuid
+
+import motor.motor_asyncio
+import chat_summarizer
 
 # Note: This will trigger the loading of the model and DB into RAM
 try:
@@ -41,18 +44,27 @@ except Exception as e:
     sys.exit(1)
 
 
-#  Helper: Validate and Update Session 
+# ─────────────────────────────────────────────
+#  MONGODB CLIENT
+# ─────────────────────────────────────────────
+mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+mongo_db = mongo_client["gracebot"]
+mongo_histories = mongo_db["chat_histories"]
+
+
+# ─────────────────────────────────────────────
+#  SESSION HELPERS
+# ─────────────────────────────────────────────
+
 async def validate_session(session_id):
     if not session_id or session_id not in sessions:
         return False
         
     current_time = time.time()
-    # Access the timestamp inside the session dictionary
     last_activity = sessions[session_id]['last_activity']
     
     if (current_time - last_activity) > session_timeout:
-        # clean up RAM and return False
-        del sessions[session_id]
+        # Session expired — background monitor handles summarization + cleanup
         return False
         
     # Valid session: Update activity timestamp (Sliding Window)
@@ -139,7 +151,97 @@ Return concise bullet points.'''
         except Exception as e:
             print("Summary failed:", e)
 
-# --- ROUTING ---
+
+# ─────────────────────────────────────────────
+#  BACKGROUND SESSION MONITOR
+# ─────────────────────────────────────────────
+
+async def session_monitor():
+    """Background task: periodically checks for sessions nearing expiry,
+    triggers summarization, then cleans up from RAM."""
+    print("[MONITOR] Session monitor started")
+    while True:
+        await asyncio.sleep(30)  # Check every 30 seconds
+        now = time.time()
+        expired_sids = []
+
+        for sid, session in list(sessions.items()):
+            time_left = session_timeout - (now - session['last_activity'])
+            if time_left <= 60:  # Within 60s of expiry or already expired
+                expired_sids.append(sid)
+
+        for sid in expired_sids:
+            session = sessions.get(sid)
+            if not session:
+                continue
+
+            print(f"[MONITOR] Session {sid[:8]}... expiring. Triggering summarization...")
+            try:
+                success = await chat_summarizer.summarize_and_save(
+                    client=client,
+                    mongo_collection=mongo_histories,
+                    session_id=sid,
+                    full_history=session.get('full_history', []),
+                    user_name=session.get('user_name'),
+                    user_contact=session.get('user_contact'),
+                    summary_model=SUMMARY_MODEL,
+                    final_model=FINAL_MODEL
+                )
+                if success:
+                    print(f"[MONITOR] ✅ Session {sid[:8]}... summarized and saved")
+                else:
+                    print(f"[MONITOR] ⏭️ Session {sid[:8]}... skipped (too short)")
+            except Exception as e:
+                print(f"[MONITOR] ❌ Summarization failed for {sid[:8]}...: {e}")
+            finally:
+                sessions.pop(sid, None)  # Always clean up from RAM
+                print(f"[MONITOR] 🗑️ Session {sid[:8]}... removed from RAM")
+
+
+# ─────────────────────────────────────────────
+#  STARTUP / SHUTDOWN
+# ─────────────────────────────────────────────
+
+@app.before_serving
+async def startup():
+    asyncio.create_task(session_monitor())
+    # Test MongoDB connection
+    try:
+        await mongo_db.command("ping")
+        print("[OK] MongoDB Atlas connected successfully")
+    except Exception as e:
+        print(f"[WARN] MongoDB connection issue: {e}")
+
+
+@app.after_serving
+async def shutdown():
+    """On server shutdown, summarize all remaining active sessions."""
+    print("[SHUTDOWN] Summarizing remaining sessions...")
+    for sid in list(sessions.keys()):
+        session = sessions[sid]
+        try:
+            await chat_summarizer.summarize_and_save(
+                client=client,
+                mongo_collection=mongo_histories,
+                session_id=sid,
+                full_history=session.get('full_history', []),
+                user_name=session.get('user_name'),
+                user_contact=session.get('user_contact'),
+                summary_model=SUMMARY_MODEL,
+                final_model=FINAL_MODEL
+            )
+        except Exception as e:
+            print(f"[SHUTDOWN] Failed for {sid[:8]}...: {e}")
+        finally:
+            sessions.pop(sid, None)
+    mongo_client.close()
+    print("[SHUTDOWN] All connections closed.")
+
+
+# ─────────────────────────────────────────────
+#  ROUTES
+# ─────────────────────────────────────────────
+
 @app.route('/get_userinfo', methods=['POST'])
 async def get_userinfo():
     data = await request.get_json()
@@ -168,7 +270,7 @@ async def get_session():
     'last_activity': time.time(),
     'memory_summary': "",
     'recent_history': [],
-    'full_history': [],  # optional, only for frontend reload
+    'full_history': [],
     'user_name': None,
     'user_contact': None
     }
@@ -181,7 +283,6 @@ async def get_history():
         sid = data.get('session_id') if data else None
         
         # Return empty history for unknown/expired sessions instead of 401
-        # This prevents the frontend from destroying its session state
         if not sid or sid not in sessions:
             return jsonify({"history": []})
         

@@ -1,0 +1,5 @@
+{
+    "active_model": "heading_classifierv2.joblib",
+    "heading_threshold": 0.70,
+    "description": "Configuration for the RAG Engine's document classification pipeline. Change the active_model to dynamically swap feature sets, and adjust the threshold to tune precision vs recall."
+}
